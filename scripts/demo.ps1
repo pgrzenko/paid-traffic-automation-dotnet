@@ -3,12 +3,12 @@ $ErrorActionPreference = 'Stop'
 function Get-Api([string]$Path) { Invoke-RestMethod "$BaseUrl/api/$Path" }
 function Post-Api([string]$Path) { Invoke-RestMethod -Method Post "$BaseUrl/api/$Path" }
 
-$campaign = Get-Api 'campaigns' | Where-Object id -eq '1001'
+$campaign = (Get-Api 'campaigns') | Where-Object id -eq '1001'
 if ($campaign.status -ne 'Enabled') { throw 'This demonstration requires a fresh Compose database. See README reset instructions.' }
 Write-Host "Before: $($campaign.name), $($campaign.status), spend $($campaign.spend), conversions $($campaign.conversions)"
 $result = Post-Api 'evaluations/run'
 if ($result.createdIncidents -ne 4 -or $result.completedActions -ne 3) { throw 'Unexpected evaluation result.' }
-$campaign = Get-Api 'campaigns' | Where-Object id -eq '1001'
+$campaign = (Get-Api 'campaigns') | Where-Object id -eq '1001'
 if ($campaign.status -ne 'Paused') { throw 'Automatic campaign was not paused.' }
 $incidents = Get-Api 'incidents'
 $automatic = $incidents | Where-Object campaignId -eq '1001'

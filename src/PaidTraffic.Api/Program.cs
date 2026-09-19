@@ -40,11 +40,9 @@ if (!demo && string.IsNullOrWhiteSpace(apiKey))
     throw new InvalidOperationException("Security:ApiKey is required outside explicit demo mode.");
 if (app.Configuration.GetValue("Evaluation:IntervalSeconds", 60) < 1)
     throw new InvalidOperationException("Evaluation interval must be positive.");
-// The host deliberately only enables the simulator. See the separately compiled SDK adapter.
+// The host deliberately only enables the simulator. The SDK adapter is compiled but not registered.
 if (app.Configuration.GetValue("GoogleAds:Mode", "Simulated") != "Simulated")
     throw new InvalidOperationException("This demo host supports only Simulated mode. Wire and validate the SDK adapter before live use.");
-
-
 if (args.Contains("--migrate", StringComparer.Ordinal))
 {
     await using var scope = app.Services.CreateAsyncScope();
