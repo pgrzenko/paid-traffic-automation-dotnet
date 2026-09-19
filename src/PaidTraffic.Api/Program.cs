@@ -11,16 +11,6 @@ using PaidTraffic.Api.Operations;
 using PaidTraffic.Api.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
-var demo = builder.Configuration.GetValue<bool>("Demo:Enabled");
-var apiKey = builder.Configuration["Security:ApiKey"];
-if (!demo && string.IsNullOrWhiteSpace(apiKey))
-    throw new InvalidOperationException("Security:ApiKey is required outside explicit demo mode.");
-if (builder.Configuration.GetValue("Evaluation:IntervalSeconds", 60) < 1)
-    throw new InvalidOperationException("Evaluation interval must be positive.");
-// The host deliberately only enables the simulator. See the separately compiled SDK adapter.
-if (builder.Configuration.GetValue("GoogleAds:Mode", "Simulated") != "Simulated")
-    throw new InvalidOperationException("This demo host supports only Simulated mode. Wire and validate the SDK adapter before live use.");
-
 builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole(options => { options.IncludeScopes = true; options.UseUtcTimestamp = true; options.TimestampFormat = "O"; });
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -44,6 +34,17 @@ if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOIN
 }
 
 var app = builder.Build();
+var demo = app.Configuration.GetValue<bool>("Demo:Enabled");
+var apiKey = app.Configuration["Security:ApiKey"];
+if (!demo && string.IsNullOrWhiteSpace(apiKey))
+    throw new InvalidOperationException("Security:ApiKey is required outside explicit demo mode.");
+if (app.Configuration.GetValue("Evaluation:IntervalSeconds", 60) < 1)
+    throw new InvalidOperationException("Evaluation interval must be positive.");
+// The host deliberately only enables the simulator. See the separately compiled SDK adapter.
+if (app.Configuration.GetValue("GoogleAds:Mode", "Simulated") != "Simulated")
+    throw new InvalidOperationException("This demo host supports only Simulated mode. Wire and validate the SDK adapter before live use.");
+
+
 if (args.Contains("--migrate", StringComparer.Ordinal))
 {
     await using var scope = app.Services.CreateAsyncScope();
