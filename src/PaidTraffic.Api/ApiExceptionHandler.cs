@@ -13,6 +13,7 @@ public sealed class ApiExceptionHandler(IProblemDetailsService problems) : IExce
         {
             WorkflowBusyException => (409, "Another workflow is running; retry later."),
             InvalidTransitionException => (409, exception.Message),
+            BadHttpRequestException => (400, "The request body or parameters are invalid."),
             ArgumentException => (400, exception.Message),
             _ => (500, "An unexpected error occurred.")
         };

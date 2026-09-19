@@ -13,6 +13,7 @@ using PaidTraffic.Api.Integration;
 using PaidTraffic.Api.Operations;
 using PaidTraffic.Api.Persistence;
 using PaidTraffic.Domain;
+using Polly.Timeout;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -43,6 +44,21 @@ public sealed class CompletionFailure : SaveChangesInterceptor
             throw new DbUpdateException("Injected persistence failure after provider success.");
         }
         return ValueTask.FromResult(result);
+    }
+}
+
+public sealed class LostAcknowledgementClient(IDbContextFactory<TrafficDbContext> factory) : IGoogleAdsClient
+{
+    private readonly SimulatedGoogleAdsClient inner = new(factory);
+    public Task<IReadOnlyList<CampaignSnapshot>> GetActiveSnapshotsAsync(DateTimeOffset start, DateTimeOffset end, CancellationToken ct) =>
+        inner.GetActiveSnapshotsAsync(start, end, ct);
+
+    public async Task<PauseResult> PauseCampaignAsync(string campaignId, Guid operationId, CancellationToken ct)
+    {
+        var result = await inner.PauseCampaignAsync(campaignId, operationId, ct);
+        if (campaignId == "1001" && result == PauseResult.Paused)
+            throw new TimeoutRejectedException("Injected timeout after provider committed the pause.");
+        return result;
     }
 }
 
@@ -224,6 +240,8 @@ public sealed class WorkflowTests(PostgresFixture postgres) : IClassFixture<Post
     {
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/policies",
             new { campaignId = "1007", maxSpendWithoutConversion = 50, currency = "USD" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/policies",
+            new { campaignId = "1007", maxSpendWithoutConversion = 50, currency = "USD", mode = "Unknown" })).StatusCode);
         var policy = new { campaignId = "1007", maxSpendWithoutConversion = 50, minimumRoas = 1.5, minimumSpendForRoas = 20, currency = "USD", mode = "RequireApproval" };
         var response = await client.PostAsJsonAsync("/api/policies", policy);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -275,5 +293,21 @@ public sealed class WorkflowTests(PostgresFixture postgres) : IClassFixture<Post
         db.Actions.Add(new OperationalAction { IncidentId = incident.Id });
         var duplicateAction = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
         Assert.Equal(PostgresErrorCodes.UniqueViolation, Assert.IsType<PostgresException>(duplicateAction.InnerException).SqlState);
+    }
+
+    [Fact]
+    public async Task Timeout_after_provider_success_reconciles_without_duplicate_action()
+    {
+        await using var timeoutApp = app.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+            services.AddScoped<IGoogleAdsClient, LostAcknowledgementClient>()));
+        using var timeoutClient = timeoutApp.CreateClient();
+        (await timeoutClient.PostAsync("/api/evaluations/run", null)).EnsureSuccessStatusCode();
+        await using var db = await DbAsync();
+        var incident = await db.Incidents.SingleAsync(i => i.CampaignId == "1001");
+        Assert.Equal(IncidentStatus.Executed, incident.Status);
+        var action = await db.Actions.SingleAsync(a => a.IncidentId == incident.Id);
+        Assert.Equal(2, action.Attempts);
+        Assert.Contains(await db.Audit.ToListAsync(), a => a.ActionId == action.Id && a.Event == "PauseRetryScheduled" && a.Detail == nameof(TimeoutRejectedException));
+        Assert.Contains(await db.Audit.ToListAsync(), a => a.ActionId == action.Id && a.Event == "PauseCompleted" && a.Detail == "AlreadyPaused");
     }
 }
