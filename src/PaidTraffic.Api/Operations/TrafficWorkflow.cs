@@ -115,7 +115,13 @@ public sealed class TrafficWorkflow(TrafficDbContext db, IGoogleAdsClient ads, T
                 Delay = TimeSpan.FromMilliseconds(200),
                 BackoffType = DelayBackoffType.Exponential,
                 UseJitter = false,
-                ShouldHandle = new PredicateBuilder<PauseResult>().Handle<TransientAdsException>().Handle<TimeoutRejectedException>()
+                ShouldHandle = new PredicateBuilder<PauseResult>().Handle<TransientAdsException>().Handle<TimeoutRejectedException>(),
+                OnRetry = async retry =>
+                {
+                    Audit("PauseRetryScheduled", incident.Id, incident.EvaluationId, action.Id, "system",
+                        retry.Outcome.Exception!.GetType().Name);
+                    await db.SaveChangesAsync(retry.Context.CancellationToken);
+                }
             })
             .AddTimeout(TimeSpan.FromSeconds(5)).Build();
 

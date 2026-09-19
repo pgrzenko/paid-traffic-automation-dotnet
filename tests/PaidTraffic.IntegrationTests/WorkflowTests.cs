@@ -27,7 +27,8 @@ public sealed class PostgresFixture : IAsyncLifetime
 
 public sealed class FixedClock : TimeProvider
 {
-    public override DateTimeOffset GetUtcNow() => new(2026, 9, 19, 12, 30, 0, TimeSpan.Zero);
+    public DateTimeOffset Current { get; set; } = new(2026, 9, 19, 12, 30, 0, TimeSpan.Zero);
+    public override DateTimeOffset GetUtcNow() => Current;
 }
 
 public sealed class CompletionFailure : SaveChangesInterceptor
@@ -221,6 +222,8 @@ public sealed class WorkflowTests(PostgresFixture postgres) : IClassFixture<Post
     [Fact]
     public async Task Policy_validation_creation_and_duplicate_conflict()
     {
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/policies",
+            new { campaignId = "1007", maxSpendWithoutConversion = 50, currency = "USD" })).StatusCode);
         var policy = new { campaignId = "1007", maxSpendWithoutConversion = 50, minimumRoas = 1.5, minimumSpendForRoas = 20, currency = "USD", mode = "RequireApproval" };
         var response = await client.PostAsJsonAsync("/api/policies", policy);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -241,5 +244,36 @@ public sealed class WorkflowTests(PostgresFixture postgres) : IClassFixture<Post
         Assert.Equal(HttpStatusCode.Unauthorized, (await secureClient.PostAsync("/api/evaluations/run", null)).StatusCode);
         secureClient.DefaultRequestHeaders.Add("X-Api-Key", "integration-test-key-only");
         (await secureClient.GetAsync("/api/campaigns")).EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task New_window_does_not_duplicate_unresolved_incident()
+    {
+        await RunAsync();
+        var clock = (FixedClock)app.Services.GetRequiredService<TimeProvider>();
+        clock.Current = clock.Current.AddHours(1);
+        await RunAsync();
+        await using var db = await DbAsync();
+        Assert.Equal(2, await db.Evaluations.CountAsync(e => e.CampaignId == "1002"));
+        Assert.Equal(1, await db.Incidents.CountAsync(i => i.CampaignId == "1002"));
+        Assert.Equal(0, (await db.Actions.Join(db.Incidents.Where(i => i.CampaignId == "1002"), a => a.IncidentId,
+            i => i.Id, (a, _) => a).SingleAsync()).Attempts);
+    }
+
+    [Fact]
+    public async Task Database_uniqueness_protects_against_duplicate_evidence_and_actions()
+    {
+        await RunAsync();
+        await using var db = await DbAsync();
+        var original = await db.Evaluations.AsNoTracking().FirstAsync();
+        original.Id = Guid.NewGuid();
+        db.Evaluations.Add(original);
+        var duplicate = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+        Assert.Equal(PostgresErrorCodes.UniqueViolation, Assert.IsType<PostgresException>(duplicate.InnerException).SqlState);
+        db.ChangeTracker.Clear();
+        var incident = await db.Incidents.FirstAsync();
+        db.Actions.Add(new OperationalAction { IncidentId = incident.Id });
+        var duplicateAction = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+        Assert.Equal(PostgresErrorCodes.UniqueViolation, Assert.IsType<PostgresException>(duplicateAction.InnerException).SqlState);
     }
 }

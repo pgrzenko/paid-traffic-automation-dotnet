@@ -6,7 +6,9 @@ using PaidTraffic.Domain;
 namespace PaidTraffic.Api;
 
 public sealed record CreatePolicy(string CampaignId, decimal MaxSpendWithoutConversion, decimal? MinimumRoas,
-    decimal MinimumSpendForRoas, string Currency, ActionMode Mode);
+    decimal MinimumSpendForRoas, string Currency, ActionMode? Mode);
+
+public sealed record IncidentDetails(Incident Incident, Evaluation Evaluation, OperationalAction Action, IReadOnlyList<AuditEntry> Audit);
 
 public static class Endpoints
 {
@@ -20,8 +22,8 @@ public static class Endpoints
             await db.Policies.AsNoTracking().OrderBy(p => p.CampaignId).ToListAsync(ct));
         api.MapPost("/policies", async (CreatePolicy request, TrafficDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(request.CampaignId) || string.IsNullOrWhiteSpace(request.Currency))
-                return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["CampaignId and Currency are required."] });
+            if (string.IsNullOrWhiteSpace(request.CampaignId) || string.IsNullOrWhiteSpace(request.Currency) || request.Mode is null)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = ["CampaignId, Currency, and an explicit Mode are required."] });
             var policy = new Policy
             {
                 CampaignId = request.CampaignId,
@@ -29,7 +31,7 @@ public static class Endpoints
                 MinimumRoas = request.MinimumRoas,
                 MinimumSpendForRoas = request.MinimumSpendForRoas,
                 Currency = request.Currency,
-                Mode = request.Mode
+                Mode = request.Mode.Value
             };
             policy.ToGuardrail().Validate();
             // Numeric inputs must fit the schema exactly; never silently round policy thresholds.
@@ -47,7 +49,7 @@ public static class Endpoints
             db.Audit.Add(new AuditEntry { Event = "PolicyCreated", Actor = demo ? "demo-operator" : "api-key-operator", Detail = policy.Id.ToString(), CreatedAt = clock.GetUtcNow() });
             await db.SaveChangesAsync(ct);
             return Results.Created($"/api/policies/{policy.Id}", policy);
-        });
+        }).Produces<Policy>(201).ProducesValidationProblem().Produces(409);
         api.MapGet("/policies/{id:guid}", async (Guid id, TrafficDbContext db, CancellationToken ct) =>
             await db.Policies.AsNoTracking().SingleOrDefaultAsync(p => p.Id == id, ct) is { } policy ? Results.Ok(policy) : Results.NotFound());
         api.MapGet("/incidents", async (int? limit, TrafficDbContext db, CancellationToken ct) =>
@@ -56,26 +58,24 @@ public static class Endpoints
         {
             var incident = await db.Incidents.AsNoTracking().SingleOrDefaultAsync(i => i.Id == id, ct);
             if (incident is null) return Results.NotFound();
-            return Results.Ok(new
-            {
-                incident,
-                evaluation = await db.Evaluations.AsNoTracking().SingleAsync(e => e.Id == incident.EvaluationId, ct),
-                action = await db.Actions.AsNoTracking().SingleAsync(a => a.IncidentId == id, ct),
-                audit = await db.Audit.AsNoTracking().Where(a => a.IncidentId == id || a.EvaluationId == incident.EvaluationId).OrderBy(a => a.Id).ToListAsync(ct)
-            });
-        });
+            return Results.Ok(new IncidentDetails(incident,
+                await db.Evaluations.AsNoTracking().SingleAsync(e => e.Id == incident.EvaluationId, ct),
+                await db.Actions.AsNoTracking().SingleAsync(a => a.IncidentId == id, ct),
+                await db.Audit.AsNoTracking().Where(a => a.IncidentId == id || a.EvaluationId == incident.EvaluationId).OrderBy(a => a.Id).ToListAsync(ct)));
+        }).Produces<IncidentDetails>().Produces(404);
         api.MapGet("/audit", async (long? after, TrafficDbContext db, CancellationToken ct) =>
             await db.Audit.AsNoTracking().Where(a => a.Id > (after ?? 0)).OrderBy(a => a.Id).Take(200).ToListAsync(ct));
         api.MapGet("/evaluations", async (TrafficDbContext db, CancellationToken ct) =>
             await db.Evaluations.AsNoTracking().OrderByDescending(e => e.CreatedAt).ThenBy(e => e.Id).Take(200).ToListAsync(ct));
-        api.MapPost("/evaluations/run", async (TrafficWorkflow workflow, CancellationToken ct) => Results.Ok(await workflow.RunAsync(ct)));
+        api.MapPost("/evaluations/run", async (TrafficWorkflow workflow, CancellationToken ct) => Results.Ok(await workflow.RunAsync(ct)))
+            .Produces<EvaluationSummary>().ProducesProblem(409);
         foreach (var decision in new[] { "approve", "reject", "retry" })
         {
             api.MapPost($"/incidents/{{id:guid}}/{decision}", async (Guid id, TrafficWorkflow workflow, CancellationToken ct) =>
             {
                 var incident = await workflow.DecideAsync(id, decision, demo ? "demo-operator" : "api-key-operator", ct);
                 return incident is null ? Results.NotFound() : Results.Ok(incident);
-            });
+            }).Produces<Incident>().Produces(404).ProducesProblem(409);
         }
     }
 }

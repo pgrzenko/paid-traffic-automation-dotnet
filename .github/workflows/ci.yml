@@ -12,6 +12,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.observability.yml
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -35,6 +37,15 @@ jobs:
       - name: Verify automatic and approval demos
         shell: pwsh
         run: ./scripts/demo.ps1
+      - name: Verify exported business telemetry
+        run: |
+          for attempt in $(seq 1 30); do
+            docker compose logs collector > /tmp/pta-telemetry.log
+            if grep -q campaign_evaluations_total /tmp/pta-telemetry.log && grep -q campaign.pause /tmp/pta-telemetry.log; then exit 0; fi
+            sleep 2
+          done
+          tail -80 /tmp/pta-telemetry.log
+          exit 1
       - name: Container diagnostics
         if: failure()
         run: docker compose logs --tail=100
