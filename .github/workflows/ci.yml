@@ -1,0 +1,48 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet restore --locked-mode
+      - run: dotnet build -c Release --no-restore
+      - run: dotnet format --verify-no-changes --no-restore
+      - run: dotnet test -c Release --no-build --logger "trx;LogFileName=tests.trx"
+      - run: dotnet tool restore
+      - run: dotnet ef migrations has-pending-model-changes --project src/PaidTraffic.Api --no-build --configuration Release
+      - name: Build and start complete demo
+        run: |
+          docker compose up --build -d
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://localhost:8080/health; then exit 0; fi
+            sleep 2
+          done
+          docker compose logs --tail=80
+          exit 1
+      - name: Verify automatic and approval demos
+        shell: pwsh
+        run: ./scripts/demo.ps1
+      - name: Container diagnostics
+        if: failure()
+        run: docker compose logs --tail=100
+      - name: Stop demo
+        if: always()
+        run: docker compose down -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'

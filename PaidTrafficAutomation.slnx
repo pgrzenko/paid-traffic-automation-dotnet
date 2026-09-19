@@ -1,8 +1,10 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/PaidTraffic.Api/PaidTraffic.Api.csproj" />
     <Project Path="src/PaidTraffic.Domain/PaidTraffic.Domain.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/PaidTraffic.Domain.Tests/PaidTraffic.Domain.Tests.csproj" />
+    <Project Path="tests/PaidTraffic.IntegrationTests/PaidTraffic.IntegrationTests.csproj" />
   </Folder>
 </Solution>
