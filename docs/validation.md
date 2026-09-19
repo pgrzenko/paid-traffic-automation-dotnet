@@ -16,6 +16,8 @@ Docker Desktop on this Windows workstation failed to start because its inference
 
 ## Linux validation
 
+The [complete application validation run](https://github.com/pgrzenko/paid-traffic-automation-dotnet/actions/runs/35438186688) passed all 32 tests, container build/start, migrations, both demo paths, duplicate-run assertions, and OTLP receipt checks. Subsequent CI configuration updates pin Ubuntu 24.04 and current official action releases by commit SHA; the Actions history records validation of those revisions too.
+
 GitHub-hosted Linux runners provide the working container engine. CI restores the pinned dependency graph from a clean checkout, builds Release, checks formatting, runs real PostgreSQL Testcontainers integration tests, checks migrations, builds the Docker image, starts the full Compose demo, and executes the PowerShell assertions. The observability overlay also verifies receipt of a business counter and a pause span at an OTLP collector.
 
 The final suite contains 18 domain cases and 14 PostgreSQL integration cases. Integration coverage includes:
