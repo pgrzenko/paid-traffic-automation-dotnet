@@ -40,7 +40,7 @@ public class GuardrailTests
     [InlineData(IncidentStatus.Executing)]
     [InlineData(IncidentStatus.ExecutionFailed)]
     public void Approval_cannot_repeat(IncidentStatus status) =>
-        Assert.Throws<InvalidOperationException>(() => IncidentTransitions.Approve(status));
+        Assert.Throws<InvalidTransitionException>(() => IncidentTransitions.Approve(status));
 
     [Fact]
     public void Valid_transitions_are_explicit()
@@ -48,6 +48,6 @@ public class GuardrailTests
         Assert.Equal(IncidentStatus.Executing, IncidentTransitions.Approve(IncidentStatus.PendingApproval));
         Assert.Equal(IncidentStatus.Rejected, IncidentTransitions.Reject(IncidentStatus.PendingApproval));
         Assert.Equal(IncidentStatus.Executing, IncidentTransitions.Retry(IncidentStatus.ExecutionFailed));
-        Assert.Throws<InvalidOperationException>(() => IncidentTransitions.Retry(IncidentStatus.Executed));
+        Assert.Throws<InvalidTransitionException>(() => IncidentTransitions.Retry(IncidentStatus.Executed));
     }
 }

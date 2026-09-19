@@ -51,9 +51,11 @@ public static class GuardrailEvaluator
 public static class IncidentTransitions
 {
     public static IncidentStatus Approve(IncidentStatus status) => status == IncidentStatus.PendingApproval
-        ? IncidentStatus.Executing : throw new InvalidOperationException("Only pending incidents can be approved.");
+        ? IncidentStatus.Executing : throw new InvalidTransitionException("Only pending incidents can be approved.");
     public static IncidentStatus Reject(IncidentStatus status) => status == IncidentStatus.PendingApproval
-        ? IncidentStatus.Rejected : throw new InvalidOperationException("Only pending incidents can be rejected.");
+        ? IncidentStatus.Rejected : throw new InvalidTransitionException("Only pending incidents can be rejected.");
     public static IncidentStatus Retry(IncidentStatus status) => status == IncidentStatus.ExecutionFailed
-        ? IncidentStatus.Executing : throw new InvalidOperationException("Only failed incidents can be retried.");
+        ? IncidentStatus.Executing : throw new InvalidTransitionException("Only failed incidents can be retried.");
 }
+
+public sealed class InvalidTransitionException(string message) : InvalidOperationException(message);
